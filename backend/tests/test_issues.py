@@ -13,9 +13,6 @@ def txn(amount="100.00", txn_date="2025-08-14", status="COMPLETED"):
 def st(amount, kind="DEBIT", when="2025-08-15"):
     return {"settlement_amount": amount, "settlement_type": kind, "settlement_date": when}
 
-
-# ---- Scenarios from the PDF ----
-
 def test_scenario_1_perfect_match():
     r = detect_issues(txn(), [st("100.00")], AS_OF)
     assert r["status"] == "FULLY_SETTLED"
@@ -54,9 +51,6 @@ def test_scenario_7_complex_refund():
     assert r["status"] == "REFUNDED"
     assert r["flag"] is None
 
-
-# ---- 7-day rule ----
-
 def test_no_settlement_within_7_days_is_pending_no_flag():
     r = detect_issues(txn(txn_date="2025-08-14"), [], AS_OF)
     assert r["status"] == "PENDING"
@@ -64,17 +58,15 @@ def test_no_settlement_within_7_days_is_pending_no_flag():
 
 
 def test_no_settlement_after_7_days_is_critical():
-    r = detect_issues(txn(txn_date="2025-08-07"), [], AS_OF)   # 8 days old
+    r = detect_issues(txn(txn_date="2025-08-07"), [], AS_OF)  
     assert r["status"] == "PENDING"
     assert r["flag"] == "CRITICAL"
 
 
 def test_exactly_7_days_is_not_flagged():
-    r = detect_issues(txn(txn_date="2025-08-08"), [], AS_OF)   # exactly 7 days
+    r = detect_issues(txn(txn_date="2025-08-08"), [], AS_OF)  
     assert r["flag"] is None
 
-
-# ---- Failed / declined transactions ----
 
 def test_failed_transaction_without_settlement_is_fine():
     r = detect_issues(txn(status="FAILED"), [], AS_OF)
@@ -88,9 +80,6 @@ def test_failed_transaction_with_settlement_is_critical():
     assert r["issues"][0]["code"] == "SETTLEMENT_ON_FAILED_TRANSACTION"
 
 
-# ---- Money precision ----
-
 def test_two_debits_sum_exactly_to_amount():
-    # 150.00 + 84.50 must equal 234.50 exactly (this breaks with floats)
     t = txn(amount="234.50")
     assert calculate_status(t, [st("150.00"), st("84.50")]) == "FULLY_SETTLED"
