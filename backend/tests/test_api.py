@@ -136,3 +136,13 @@ def test_dashboard_summary_before_reconcile(client):
     assert s["status_breakdown"]["PENDING"] == 12
     assert s["status_breakdown"]["NOT_APPLICABLE"] == 2
     assert s["avg_days_to_settle"] is None
+
+def test_export_csv_respects_filters(client):
+    upload(client)
+    r = client.get("/transactions/export", params={"flag": "CRITICAL", "as_of": AS_OF})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    assert "attachment" in r.headers["content-disposition"]
+    lines = r.text.strip().splitlines()
+    assert lines[0].startswith("transaction_id,date,merchant_name")
+    assert len(lines) == 4                      # header + TXN007, TXN010, TXN015

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getTransactions } from "../api.js";
+import { downloadTransactionsCsv, getTransactions } from "../api.js";
 import { FlagBadge, STATUS_LABELS, StatusBadge, money } from "../ui.jsx";
 
 export default function TransactionList() {
@@ -16,9 +16,12 @@ export default function TransactionList() {
       getTransactions({ status, flag, search })
         .then((data) => { setRows(data); setError(""); })
         .catch((e) => setError(e.message));
-    }, 250);                                   // small delay while typing in search
+    }, 250);                                   
     return () => clearTimeout(timer);
   }, [status, flag, search]);
+
+  const exportCsv = () =>
+    downloadTransactionsCsv({ status, flag, search }).catch((e) => setError(e.message));
 
   return (
     <>
@@ -33,6 +36,7 @@ export default function TransactionList() {
           <option value="WARNING">Warning</option>
         </select>
         <input placeholder="Search id, merchant, account" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <button onClick={exportCsv}>Export CSV</button>
       </div>
 
       {error && <p className="error">{error}</p>}

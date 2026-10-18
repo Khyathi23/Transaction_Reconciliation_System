@@ -1,7 +1,9 @@
+import csv
+import io
 from datetime import date
 from typing import Optional
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import metrics
@@ -10,8 +12,15 @@ from app.reconciler import reconcile_csv
 
 DEFAULT_CSV = BASE_DIR.parent / "data" / "settlement_report.csv"
 
+EXPORT_HEADERS = [
+    "transaction_id", "date", "merchant_name", "account_id", "amount", "currency",
+    "transaction_status", "settlement_status", "settled_amount",
+    "last_settlement_date", "issue_flag",
+]
+
 app = FastAPI(title="Transaction Reconciliation API")
 
+# Allow the React dev server (Vite) to call this API from the browser
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -30,6 +39,18 @@ def get_db():
         conn.close()
 
 
+def _csv_safe(value):
+    """Stop Excel from running text like '=SUM(...)' as a formula."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@"):
+        return "'" + value
+    return value
+
+
+@app.get("/")
+def root():
+    return {"message": "Transaction Reconciliation API", "docs": "/docs"}
+
+
 @app.post("/reconcile")
 def reconcile_endpoint(file: Optional[UploadFile] = File(None), conn=Depends(get_db)):
     """Upload a settlement CSV and reconcile it. With no file, uses data/settlement_report.csv."""
@@ -42,7 +63,7 @@ def reconcile_endpoint(file: Optional[UploadFile] = File(None), conn=Depends(get
 
     try:
         return reconcile_csv(conn, content)
-    except ValueError as e:                    
+    except ValueError as e:                     # empty file, missing columns, bad encoding
         raise HTTPException(400, str(e))
 
 
@@ -55,6 +76,36 @@ def list_transactions(
     conn=Depends(get_db),
 ):
     return metrics.list_transactions(conn, metrics.resolve_as_of(conn, as_of), status, flag, search)
+
+
+# Must stay ABOVE /transactions/{transaction_id}, otherwise "export" is read as an id (404)
+@app.get("/transactions/export")
+def export_transactions(
+    status: Optional[str] = Query(None),
+    flag: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    as_of: Optional[date] = Query(None),
+    conn=Depends(get_db),
+):
+    """Download the (filtered) transaction list as a CSV file."""
+    rows = metrics.list_transactions(conn, metrics.resolve_as_of(conn, as_of), status, flag, search)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(EXPORT_HEADERS)
+    for r in rows:
+        writer.writerow([
+            _csv_safe(r["transaction_id"]), r["date"], _csv_safe(r["merchant_name"]),
+            _csv_safe(r["account_id"]), f"{r['amount']:.2f}", r["currency"],
+            r["transaction_status"], r["settlement_status"], f"{r['settled_amount']:.2f}",
+            r["last_settlement_date"] or "", r["flag"] or "OK",
+        ])
+
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="transactions.csv"'},
+    )
 
 
 @app.get("/transactions/{transaction_id}")

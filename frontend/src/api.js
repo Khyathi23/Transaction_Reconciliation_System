@@ -34,3 +34,26 @@ export const reconcile = (file) => {
   body.append("file", file);
   return request("/reconcile", { method: "POST", body });
 };
+
+export async function downloadTransactionsCsv(params = {}) {
+  const q = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => v && q.set(k, v));
+
+  let res;
+  try {
+    res = await fetch(`${BASE}/transactions/export?${q.toString()}`);
+  } catch {
+    throw new Error("Cannot reach the API. Is the backend running on port 8000?");
+  }
+  if (!res.ok) throw new Error("Export failed: " + res.statusText);
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "transactions.csv";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
