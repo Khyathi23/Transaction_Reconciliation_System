@@ -40,7 +40,7 @@ cd backend
 python -m pytest -v
 ```
 
-## Demo: settlement dated before the transaction
+## Demo: settlement dated before the transaction (Task 1)
 
 The sample CSV has no such row, so a helper script creates the test data.
 
@@ -70,6 +70,17 @@ curl.exe http://127.0.0.1:8000/dashboard/summary          # "warnings": 2
 
 `make_early.py` only changes a date, so the amounts still match and the flag is WARNING, not critical. Run `python scripts/seed.py` to reset. On macOS/Linux use `curl` instead of `curl.exe`.
 
+## Demo: merchant summary (Task 2)
+
+Start the backend as above (seed first for a clean state), then in another terminal from `backend`:
+
+```bash
+curl.exe -s http://127.0.0.1:8000/dashboard/merchants | python -m json.tool
+```
+
+- **Before Reconcile:** one entry per merchant, Apple first (1299.99 outstanding), Shell Gas with 2 transactions.
+- Click **Reconcile** in the UI and run the same command again. The list re-sorts: Netflix (15.99) first, then Shell Gas (10.00), then merchants with nothing outstanding.
+
 ## Architecture
 
 ```
@@ -78,7 +89,7 @@ backend/app/
   matcher.py      Match a row to a transaction: lifecycle_id first, then account+merchant+date
   issues.py       Pure business rules: net totals, status, critical/warning detection
   reconciler.py   Orchestration: insert settlements, log exceptions, recompute transaction totals
-  metrics.py      Dashboard summary and transaction list/detail queries
+  metrics.py      Dashboard summary, merchant summary, and transaction list/detail queries
   main.py         FastAPI routes
   db.py           SQLite connection helper
 backend/sql/      schema.sql, seed.sql
@@ -105,6 +116,7 @@ Interactive docs: http://127.0.0.1:8000/docs
 | GET | `/transactions/export` | Download the (filtered) transaction list as CSV. Same query parameters as `/transactions`. |
 | GET | `/transactions/{id}` | Transaction details, settlements, issues with recommendations, and timeline. |
 | GET | `/dashboard/summary` | Totals, status breakdown, issue counts, outstanding amount, performance metrics. |
+| GET | `/dashboard/merchants` | Per-merchant summary: transaction count, total amount, net settled, outstanding, critical issue count. Sorted by outstanding, highest first. |
 
 **POST /reconcile response**
 ```json
@@ -148,18 +160,20 @@ Errors: `400` for an unusable file (empty, missing columns), `404` for an unknow
 10. Duplicate `settlement_id`s (within a file or already in the database) are skipped.
 11. A `reconciliation_exceptions` table was added to the provided schema.
 12. A settlement dated before its transaction is flagged as a Warning, not Critical: it is suspicious (likely a data entry or timezone error) but the amounts may still be correct.
+13. **Merchant summary** uses the same outstanding rule as the dashboard (assumption 7), so merchant figures add up to the dashboard total. As a result, a merchant whose only transactions are failed or declined (for example Uber Taxi) shows 0 outstanding. Net settled counts every settlement of the merchant's transactions, debits minus credits.
 
 ## Testing
 
-49 tests: unit tests for status and issue rules (all 7 scenarios from the brief), CSV validation, matching, reconciliation (including idempotency and status transitions), and integration tests for all endpoints (including CSV export and the settlement-before-transaction warning) using an in-memory SQLite database.
+50 tests: unit tests for status and issue rules (all 7 scenarios from the brief), CSV validation, matching, reconciliation (including idempotency and status transitions), and integration tests for all endpoints (including CSV export, the settlement-before-transaction warning and the merchant summary) using an in-memory SQLite database.
 
 ## Known limitations
 - No authentication or user management.
-- Whole database is read into memory for list and summary views. Fine for thousands of rows, not millions. Would need SQL aggregation and pagination at scale.
+- Whole database is read into memory for list, summary and merchant views. Fine for thousands of rows, not millions. Would need SQL aggregation and pagination at scale.
 - Only same-currency reconciliation. No currency conversion.
 - Settlements are never updated or deleted by a re-upload. A corrected settlement with the same ID is ignored.
 - SQLite is single-writer, so concurrent uploads are serialized.
 - CSV export only (no PDF).
 - The CSV loader rejects rows whose settlement date is before their transaction date, so `SETTLEMENT_BEFORE_TRANSACTION` only appears for data that reaches the database another way. Accepting and flagging those rows from uploads would be a possible follow-up.
 - A settlement dated before its transaction gives a negative "days to settle", which lowers the average days metric. Excluding negative values would be a possible follow-up.
+- The merchant summary has no frontend view yet; it is available through the API.
 - Frontend has no automated tests.
