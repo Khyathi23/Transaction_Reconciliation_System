@@ -146,3 +146,25 @@ def test_export_csv_respects_filters(client):
     lines = r.text.strip().splitlines()
     assert lines[0].startswith("transaction_id,date,merchant_name")
     assert len(lines) == 4                      # header + TXN007, TXN010, TXN015
+
+def test_settlement_before_transaction_warning(client):
+    conn = app.dependency_overrides[get_db]()      # the in-memory test connection
+    before = client.get("/dashboard/summary", params={"as_of": AS_OF}).json()["warnings"]
+
+    # TXN002 is dated 2025-08-14, so 2025-08-13 is earlier
+    conn.execute(
+        "INSERT INTO settlement_history (settlement_id, transaction_id, lifecycle_id, "
+        "settlement_date, settlement_amount, settlement_type, currency) "
+        "VALUES ('SETX1', 'TXN002', 'LC002', '2025-08-13', 4.75, 'DEBIT', 'USD')"
+    )
+    conn.commit()
+
+    detail = client.get("/transactions/TXN002", params={"as_of": AS_OF}).json()
+    assert "SETTLEMENT_BEFORE_TRANSACTION" in [i["code"] for i in detail["issues"]]
+    assert detail["issues"][0]["recommendation"]
+
+    rows = client.get("/transactions", params={"as_of": AS_OF}).json()
+    assert {r["transaction_id"]: r["flag"] for r in rows}["TXN002"] == "WARNING"
+
+    after = client.get("/dashboard/summary", params={"as_of": AS_OF}).json()["warnings"]
+    assert after == before + 1

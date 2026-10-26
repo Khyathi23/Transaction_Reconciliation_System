@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 CENT = Decimal("0.01")
-OVERDUE_DAYS = 7          
+OVERDUE_DAYS = 7          # "no settlement after 7 days" means more than 7 days
 
 
 def to_decimal(value) -> Decimal:
@@ -76,6 +76,7 @@ def detect_issues(transaction, settlements, as_of):
     issues = []
 
     if transaction["status"] != "COMPLETED":
+        # FAILED / DECLINED transactions must never have settlements
         if settlements:
             issues.append({
                 "severity": "CRITICAL",
@@ -109,7 +110,22 @@ def detect_issues(transaction, settlements, as_of):
                 "message": f"Net settled {t['net']} is less than {amount}. {missing} outstanding.",
                 "recommendation": f"Follow up on the remaining {missing}.",
             })
-        
+        # FULLY_SETTLED and REFUNDED are intentionally not flagged
+
+    # Warning: any settlement dated before the transaction itself
+    txn_date = to_date(transaction["transaction_date"])
+    early = [to_date(s["settlement_date"]) for s in settlements
+             if to_date(s["settlement_date"]) < txn_date]
+    if early:
+        issues.append({
+            "severity": "WARNING",
+            "code": "SETTLEMENT_BEFORE_TRANSACTION",
+            "message": f"{len(early)} settlement(s) dated before the transaction date "
+                       f"{txn_date} (earliest {min(early)}).",
+            "recommendation": "Check the settlement and transaction dates for a data entry "
+                              "or timezone error, and confirm with the acquirer.",
+        })
+
     if any(i["severity"] == "CRITICAL" for i in issues):
         flag = "CRITICAL"
     elif issues:
