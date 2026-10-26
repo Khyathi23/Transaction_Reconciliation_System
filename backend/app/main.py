@@ -123,3 +123,7 @@ def get_transaction(
 @app.get("/dashboard/summary")
 def dashboard_summary(as_of: Optional[date] = Query(None), conn=Depends(get_db)):
     return metrics.dashboard_summary(conn, metrics.resolve_as_of(conn, as_of))
+
+@app.get("/dashboard/merchants")
+def merchant_summary(as_of: Optional[date] = Query(None), conn=Depends(get_db)):
+    return metrics.merchant_summary(conn, metrics.resolve_as_of(conn, as_of))

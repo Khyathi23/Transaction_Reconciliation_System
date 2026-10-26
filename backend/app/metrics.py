@@ -182,3 +182,37 @@ def dashboard_summary(conn, as_of):
         if days_to_settle else None,
         "settlement_rate": round(settled_any / eligible * 100, 2) if eligible else 0.0,
     }
+
+def merchant_summary(conn, as_of):
+    transactions, grouped = _load(conn)
+    merchants = {}
+
+    for t in transactions:
+        settlements = grouped[t["transaction_id"]]
+        result = detect_issues(t, settlements, as_of)
+        net = summarize_settlements(settlements)["net"]
+        amount = to_decimal(t["transaction_amount"])
+
+        m = merchants.setdefault(t["merchant_name"], {
+            "merchant_name": t["merchant_name"],
+            "transaction_count": 0,
+            "total_transaction_amount": to_decimal("0"),
+            "total_net_settled": to_decimal("0"),
+            "outstanding_amount": to_decimal("0"),
+            "critical_issue_count": 0,
+        })
+        m["transaction_count"] += 1
+        m["total_transaction_amount"] += amount
+        m["total_net_settled"] += net
+        # same definition of outstanding as the dashboard summary
+        if t["status"] == "COMPLETED" and result["status"] in ("PENDING", "PARTIAL"):
+            m["outstanding_amount"] += max(amount - net, 0)
+        if result["flag"] == "CRITICAL":
+            m["critical_issue_count"] += 1
+
+    rows = sorted(merchants.values(),
+                  key=lambda m: (-m["outstanding_amount"], m["merchant_name"]))
+    for m in rows:
+        for key in ("total_transaction_amount", "total_net_settled", "outstanding_amount"):
+            m[key] = float(m[key])
+    return rows

@@ -168,3 +168,24 @@ def test_settlement_before_transaction_warning(client):
 
     after = client.get("/dashboard/summary", params={"as_of": AS_OF}).json()["warnings"]
     assert after == before + 1
+
+def test_merchant_summary_with_seed_data(client):
+    r = client.get("/dashboard/merchants", params={"as_of": AS_OF})
+    assert r.status_code == 200
+    rows = r.json()
+
+    names = [m["merchant_name"] for m in rows]
+    assert len(rows) == len(set(names)) == 12             # one entry per merchant
+
+    shell = next(m for m in rows if m["merchant_name"] == "Shell Gas")
+    assert shell["transaction_count"] == 2                # TXN003 and TXN014
+    assert shell["total_transaction_amount"] == 74.20
+    assert shell["total_net_settled"] == 0
+    assert shell["outstanding_amount"] == 74.20           # nothing settled yet
+
+    netflix = next(m for m in rows if m["merchant_name"] == "Netflix")
+    assert netflix["critical_issue_count"] == 1           # no settlement after 8 days
+
+    amounts = [m["outstanding_amount"] for m in rows]
+    assert amounts == sorted(amounts, reverse=True)
+    assert rows[0]["merchant_name"] == "Apple"            # 1299.99 is the largest
